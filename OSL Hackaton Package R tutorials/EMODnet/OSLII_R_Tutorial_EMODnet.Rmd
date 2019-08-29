@@ -1223,6 +1223,7 @@ write.csv(geology, file = "EMODnetGeology-CoastalMigration.csv")
 # EMODnet Biology 
 
 We will show three section on how to work with EMODnet Biology data:
+
 * download data from the webportal and then load and visualize these data in R
 * download a selection of the data based on specific WFS queries
 * access the EMODnet Biology data products based on WFS queries
