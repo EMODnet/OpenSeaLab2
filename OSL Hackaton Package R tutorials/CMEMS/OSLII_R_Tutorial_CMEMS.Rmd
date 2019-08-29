@@ -1,0 +1,42 @@
+---
+title: "R tutorial: Working with CMEMS data"
+author: 
+output:
+  html_document:
+    number_section: yes
+    theme: default
+    toc: yes
+    toc_depth: 2
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+---
+
+
+```{r setup, include=FALSE}
+library(knitr)
+library(kableExtra)
+knitr::opts_chunk$set(
+  eval = TRUE,
+	echo = TRUE,
+	fig.align = "center",
+	message = FALSE,
+	warning = FALSE
+)
+# set up python interpreter if not specified, it's the first on PATH
+library(reticulate)
+# use_python(PATH/TO/PYTHON)
+
+# clean environment
+rm(list=ls())
+gc()
+```
+
+We will use the R packages listed below. They can be downloaded using the `install.packages()` command. In case you are running R on Windows, you may need to download [Rtools](https://cran.r-project.org/bin/windows/Rtools) to build the packages.
+
+```{r, results='hide'}
+#install.packages()
+# load dependencies
+```
+
+

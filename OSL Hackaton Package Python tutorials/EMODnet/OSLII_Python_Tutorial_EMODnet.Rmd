@@ -1,0 +1,254 @@
+---
+title: "Python tutorial: Working with EMODnet data"
+author: Written by Thierry Schmitt (EMODnet Bathymetry), Pascal Derycke (EMODnet Secretariat) and Tim Collart (EMODnet Secretariat).
+output:
+  html_document:
+    number_section: yes
+    theme: default
+    toc: yes
+    toc_depth: 2
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+---
+
+
+```{r setup, include=FALSE}
+library(knitr)
+library(kableExtra)
+knitr::opts_chunk$set(
+  eval = TRUE,
+	echo = TRUE,
+	fig.align = "center",
+	message = FALSE,
+	warning = FALSE
+)
+# set up python interpreter if not specified, it's the first on PATH
+library(reticulate)
+# add path to environment
+use_python("C:/Users/timc/.conda/envs/python_tutorials")
+knitr::knit_engines$set(python = reticulate::eng_python)
+# clean environment
+rm(list=ls())
+gc()
+```
+
+We will use the python libraries listed below. They can be installed with following command `pip install os owslib gdal requests pandas matplotlib basemap`.
+
+```{python, include=FALSE}
+# for matplotlib and basemap to work as intended
+import os
+os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = 'C:/Users/timc/.conda/envs/python_tutorials/Library/plugins/platforms'
+os.environ['PROJ_LIB'] = 'C:/Users/timc/.conda/envs/python_tutorials/Library/share'
+```
+
+```{python, results='hide'}
+import os
+from owslib.wcs import WebCoverageService
+from osgeo import gdal
+import requests
+import xml.dom.minidom
+import datetime
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.basemap import Basemap
+```
+
+# Working with data from EMODnet bathymetry
+
+## Access raster data through WCS
+
+We use the `owslib` package to access the EMODnet bathymetry WCS.
+
+```{python}
+# define the connection
+url = "https://ows.emodnet-bathymetry.eu/wcs?"
+wcs = WebCoverageService(url, version='1.0.0', timeout = 320)
+print(wcs.identification.type)
+print(wcs.identification.title)
+```
+
+We set the desired parameters of the bathymetry raster we want to download.
+
+```{python}
+# define variables
+clipfile =  r'temp.tif'
+requestbbox = (2,51.5,5,54)
+layer = 'emodnet:mean'
+# get the data
+bathyml = 'emodnet:mean'
+sed = wcs[layer] # this is necesaary to get essential metadata from the advertised layer
+print(sed.keywords)
+print(sed.grid.highlimits)
+print(sed.boundingboxes)
+cx,cy = map(int,sed.grid.highlimits)
+bbox = sed.boundingboxes[0]['bbox']
+lx,ly,hx,hy = map(float,bbox)
+resx,resy = (hx-lx)/cx,(hy-ly)/cy
+width = cx/1000
+height = cy/1000
+```
+
+We download the data using WCS and save it to a GEOTIFF file.
+
+```{python}
+# get the data
+gc = wcs.getCoverage(identifier=bathyml, bbox = requestbbox, coverage=sed, format='GeoTIFF', crs=sed.boundingboxes[0]['nativeSrs'],resx=resx,resy=resy)
+
+# write to a file
+fn = clipfile
+f = open(fn,'wb')
+f.write(gc.read())
+f.close()
+```
+
+The data can now be loaded to make a nice bathymetry map using the `basemap` library.
+
+```{python, results = 'hide'}
+# load the geotiff file
+ds = gdal.Open(clipfile)
+
+# get the dimentions of column and row
+nc   = ds.RasterXSize
+nr   = ds.RasterYSize
+
+# read elevation data
+bathy = ds.ReadAsArray()
+
+# only get positive depth values
+bathy[bathy < 0] = 0
+
+# get Longitude and Latitude info
+geotransform = ds.GetGeoTransform()
+xOrigin      = geotransform[0]
+yOrigin      = geotransform[3]
+pixelWidth   = geotransform[1]
+pixelHeight  = geotransform[5]
+
+# enerate Longitude and Latitude array
+lons = xOrigin + np.arange(0, nc)*pixelWidth
+lats = yOrigin + np.arange(0, nr)*pixelHeight
+
+# Plot setup
+fig= plt.figure(figsize=(10,10))
+ax = plt.subplot(111,aspect = 'equal')
+plt.subplots_adjust(left=0.1, bottom=0.1, right=0.9, top=0.9, wspace=0, hspace=0)
+
+#Map setup
+map = Basemap(resolution='f', projection='cyl', llcrnrlon=requestbbox[0],llcrnrlat=requestbbox[1], urcrnrlon=requestbbox[2], urcrnrlat=requestbbox[3]) #EDIT
+parallels = np.arange(-90,90,0.5)
+meridians = np.arange(0,360,0.5)
+map.drawparallels(parallels,labels=[1,0,0,0],color='w', fontsize=10, fontweight='bold')
+meri = map.drawmeridians(meridians,labels=[0,0,0,1],color='w', fontsize=10, fontweight='bold')
+
+#Load colormap and setup elevation contour levels
+cmap=plt.get_cmap("GnBu")
+keys = np.linspace(round(bathy.min(),-1), round(bathy.max(),-1), 36)
+
+#Contour plot
+x, y = map(*np.meshgrid(lons, lats))
+cs=map.contourf(x, y, bathy, keys, cmap=cmap)
+
+#add land area
+map.fillcontinents(color="#FFDDCC", lake_color='#DDEEFF')
+map.drawmapboundary(fill_color="#DDEEFF")
+map.drawcoastlines()
+
+map.drawparallels(parallels,labels=[1,0,0,0],color='k', fontsize=10, fontweight='bold')
+meri = map.drawmeridians(meridians,labels=[0,0,0,1],color='k', fontsize=10, fontweight='bold')
+
+cb = map.colorbar(cs, 'bottom', size='5%', pad='10%')
+
+cb.set_label('Elevation (m)', fontsize=12, fontweight='bold')
+cb.ax.tick_params(labelsize=10)
+
+plt.show()
+```
+
+# Search for data using EMODnet Catalogue Service
+
+Using the EMODnet Catalogue Service for the Web (CSW), we can query and search collections of metadata for data, services and information objects related to the EMODnet Marine Data. In the example below, we use send a request to the CSW endpoint, parse the XML response and store it in a `pandas` dataframe.
+
+```{python}
+# get timestamp
+date = datetime.datetime.now()
+print('year: '+str(date.year)+'\nmonth: '+str(date.month)+'\nday: '+str(date.day)+'\nhour: '+str(date.hour)+'\nminute: '+str(date.minute))
+archive_date=str(date).split()[0]
+outputfilename = "Archive_" + archive_date + ".xml"
+
+# CSW request
+url_getcapa="http://www.emodnet.eu/geonetwork/emodnet/eng/csw?REQUEST=GetRecords&SERVICE=CSW&VERSION=2.0.2&ELEMENTSETNAME=summary&OUTPUTSCHEMA=http://www.opengis.net/cat/csw/2.0.2&CONSTRAINTLANGUAGE=FILTER&CONSTRAINT_LANGUAGE_VERSION=1.1.0&RESULTTYPE=results&TYPENAMES=csw:Record&CONSTRAINT=%3Cogc:Filter%20xmlns:ogc=%22http://www.opengis.net/ogc%22%3E%3Cogc:PropertyIsEqualTo%3E%3Cogc:PropertyName%3Edc:type%3C/ogc:PropertyName%3E%3Cogc:Literal%3Edataset%3C/ogc:Literal%3E%3C/ogc:PropertyIsEqualTo%3E%3C/ogc:Filter%3E&maxRecords=1000"
+
+# Get response and save to file
+response = requests.get(url_getcapa, timeout=120.000)
+if response.status_code != 200:
+  sendmail(url_getcapa)
+
+if response.status_code == 200:
+  with open(outputfilename, 'wb') as f:
+    f.write(response.content)
+```
+
+```{python}
+# read and parse response and store in in a pandas dataframe
+if response.status_code == 200:	
+  doc = xml.dom.minidom.parse(outputfilename)
+  SummaryRecord = doc.getElementsByTagName("csw:SummaryRecord")
+
+records = pd.DataFrame() 
+for Query in SummaryRecord:
+  # gather records
+  getrecord_layer = {}
+  try:
+    Identifier= Query.getElementsByTagName('dc:identifier')[0]
+    getrecord_layer["Identifier"]=Identifier.childNodes[0].data
+    #print(Identifier.childNodes[0].data)
+
+  except IndexError:
+    getrecord_layer["Identifier"]="None"
+    #print ("No Identifier at %s" % i)
+
+  try:
+    Title= Query.getElementsByTagName('dc:title')[0]
+    getrecord_layer["Title"]=Title.childNodes[0].data
+    #print(Title.childNodes[0].data)
+
+  except IndexError:
+    getrecord_layer["Title"]="None"
+    #print ("No Title at %s" % i)
+
+  try:
+    list_keyword = []
+    Keyword= Query.getElementsByTagName('dc:subject')
+    for node in Keyword:
+      list_keyword.append(node.childNodes[0].data)
+      getrecord_layer["Keywords"]=str(list_keyword)
+    #print("Keywords = %s" % list_keyword)
+
+  except IndexError:
+    getrecord_layer["Keywords"]="None"
+    #print ("No Keyword item at %s" % i)
+
+  try:
+    Abstract= Query.getElementsByTagName('dct:abstract')[0]
+    getrecord_layer["Abstract"]=Abstract.childNodes[0].data
+
+  except IndexError:
+    getrecord_layer["Abstract"]="None"
+    #print ("No Abstract item at %s" % i)
+    
+  # append to data frame
+  records = records.append(getrecord_layer, ignore_index=True)
+  
+# Print the number of records gathered
+print('No of records: '+str(records.shape[0]))
+```
+
+Now that we have all the records stored in a dataframe, we can perform detailed queries.
+
+```{python}
+records.Title[records.Keywords.str.contains('Habitat')]# look for Records with keyword 'Habitat'
+records.Title[records.Keywords.str.contains('substrate')]# look for Records with keyword 'substrate'
+```
+

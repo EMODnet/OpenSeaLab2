@@ -1,0 +1,13 @@
+name: python_tutorials
+channels:
+  - conda-forge
+dependencies:
+  - numpy
+  - matplotlib
+  - pandas
+  - jupyter
+  - pip
+  - owslib
+  - gdal
+  - pyqt
+
