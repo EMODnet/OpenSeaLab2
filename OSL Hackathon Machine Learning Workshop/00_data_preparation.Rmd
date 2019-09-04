@@ -1,0 +1,392 @@
+---
+title: "00_data_preparation"
+author: "Lennert Schepers"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 5
+    toc_float: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+if (!require("DT")) install.packages('DT')
+library(DT)
+```
+
+##Data preparation
+
+This shows the code that was run to prepare the data for the Machine Learning workshop at the OpenSeaLab Hackathon 2019.
+Note that for some steps you need to download the data manually.
+
+* download EMODnet Biology data
+* download Substrate
+
+However, you can do this also automatically by using webservices. We will update this document and include these automatic steps.
+
+
+### EMODnet Biology data
+
+We are using the 'Dutch national shellfish monitoring in the coastal zone':
+http://www.emodnet-biology.eu/data-catalog?module=dataset&dasid=6204
+
+
+See selection here, click 'download'
+<http://www.emodnet-biology.eu/toolbox/en/download/selection/15d69183543357>
+
+```{r load_substrate, message=FALSE, warning=FALSE, error=FALSE, fig.align='center'}
+library(sf)
+library(mapview)
+library(raster)
+
+# data downloaded in /data/20190830_162455_15d6931b78ad5a.zip
+unzip("data/20190830_162455_15d6931b78ad5a.zip",
+       exdir = "data")
+
+# read csv
+Dutch_shell_full <- read.csv("data/DATA_63zArr.csv")
+
+# convert to sf object
+Dutch_shell_sf <- st_as_sf(Dutch_shell_full,
+                           coords = c('decimallongitude','decimallatitude'),
+                           crs = 4326,
+                           remove = FALSE)
+
+# convert date-time column to POSIXct class
+Dutch_shell_sf$datecollected <- as.POSIXct(Dutch_shell_sf$datecollected,
+                                           format="%Y-%m-%dT%H:%M")
+
+# viz first 50 points on the map
+mapview(Dutch_shell_sf[1:50,],
+        zcol = "yearcollected")
+```
+
+We will select different data other parameters for our measurements, therefore we need a bounding box of the measurements:
+```{r bbox, message=FALSE, warning=FALSE, error=FALSE, fig.align='center'}
+# determine min max coordinate values
+# xmin <- st_bbox(Dutch_shell_sf)$xmin
+# ymin <- st_bbox(Dutch_shell_sf)$ymin
+# xmax <- st_bbox(Dutch_shell_sf)$xmax
+# ymax <- st_bbox(Dutch_shell_sf)$ymax
+bbox <- st_bbox(Dutch_shell_sf)
+
+```
+
+
+### Additional variables
+#### Fishing vessel density
+
+We want to retrieve the ship vessel density data (especially Fishing vessels) from EMODnet Human Activities.
+Have a look to the EMODnet Human Activities WCS service (raster layers)
+
+<https://ows.emodnet-humanactivities.eu/wcs?service=wcs&version=1.0.0&request=GetCapabilities>
+
+This returns a xml with all coverages, for example:
+
+```
+<wcs:ContentMetadata>
+  <wcs:CoverageOfferingBrief>
+    <wcs:description>Generated from GeoTIFF</wcs:description>
+    <wcs:name>emodnet:2017_01_st_00</wcs:name>
+    <wcs:label>2017_01_st_00</wcs:label>
+  ...
+</Layer>
+```
+In the example above we see the desciption of the coverage of
+
+* year 2017
+* month 01 (January)
+* shiptype 00 ('Other')
+
+See the table below for all options
+
+Year_month | ship type                                        
+------------------------| -----------------------------------------------
+2017_01 | st_00: Other 
+2017_02 | st_01: Fishing 
+2017_03 | st_02: Service 
+2017_04 | st_03: Dredging or underwater ops 
+2017_05 | st_04: Sailing |  
+2017_06 | st_05: Pleasure Craft  
+2017_07 | st_06: High speed craft  
+2017_08 | st_07: Tug and towing  
+2017_09 | st_08: Passenger 
+2017_10 | st_09: Cargo  
+2017_11 | st_10: Tanker
+2017_12 | st_11: Military and Law Enforcement 
+...        | st_12: Unknown 
+Year average: 2017_ [st_..]_avg  | st_All: All ship types 
+
+
+some examples of layers:
+
+Description | wcs coverage name                                       
+------------------------| -------
+average of 2017 Sailing density: | `emodnet:2017_st_04_avg`
+average of October Dredging: | `emodnet:2017_10_st_03`
+average of 2017 all types: | `emodnet:2017_st_00_avg`
+
+
+Let's extract the 2017 average of Fishing:
+
+```{r vesseldensity, message=FALSE, warning=FALSE, error=FALSE, fig.align='center'}
+coveragename <- 'emodnet:2017_st_01_avg'
+
+url <- 'https://ows.emodnet-humanactivities.eu/wcs?service=wcs&version=1.0.0&request=getcoverage'
+full_url <- paste(url,
+                  '&coverage=', coveragename,
+                  '&crs=EPSG:4326&BBOX=', paste(bbox, collapse = ","),
+                  '&format=image/tiff',
+                  '&interpolation=nearest&resx=0.00833333&resy=0.00833333',
+                  sep = '')
+
+fishing <- raster(full_url)
+mapview(fishing)
+
+```
+
+#### EMODnet Bathymetry
+Have a look to the EMODnet Bathymetry WCS service (raster layers)
+
+<https://ows.emodnet-humanactivities.eu/wcs?service=wcs&version=1.0.0&request=GetCapabilities>
+
+This returns a xml with all coverages, for example:
+
+```
+<wcs:ContentMetadata>
+  <wcs:CoverageOfferingBrief>
+    <wcs:description>Generated from GeoTIFF</wcs:description>
+    <wcs:name>emodnet:2017_01_st_00</wcs:name>
+    <wcs:label>2017_01_st_00</wcs:label>
+  ...
+</Layer>
+```
+
+Let's extract the mean bathymetry:
+
+```{r bathymetry, message=FALSE, warning=FALSE, error=FALSE, fig.align='center'}
+coveragename <- 'emodnet:mean'
+
+url <- 'https://ows.emodnet-bathymetry.eu/wcs?service=wcs&version=1.0.0&request=getcoverage'
+full_url <- paste(url,
+                  '&coverage=', coveragename,
+                  '&crs=EPSG:4326&BBOX=', paste(bbox, collapse = ","),
+                  '&format=image/tiff',
+                  '&interpolation=nearest&resx=0.00833333&resy=0.00833333',
+                  sep = '')
+
+bathy <- raster(full_url)
+mapview(bathy)
+
+```
+
+Extract rasterdata at locations:
+
+```{r rasterextract, message=FALSE, warning=FALSE, error=FALSE, fig.align='center'}
+Dutch_shell_sf$fishing <- extract(fishing, Dutch_shell_sf)
+Dutch_shell_sf$bathy <- extract(bathy, Dutch_shell_sf)
+```
+
+
+#### Substrate
+
+
+Download substrate data from:
+<https://www.emodnet-seabedhabitats.eu/access-data/download-data/>
+We downloaded the 'EUSeaMap → Classified habitat descriptors → Substrate type'
+
+```{r substrate, message=FALSE, warning=FALSE, error=FALSE, fig.align='center'}
+library(sf)
+library(raster)
+library(ggplot2)
+library(mapview)
+library(fasterize) #https://github.com/ecohealthalliance/fasterize
+# unzip file:
+# unzip('data/eusm2019_substrate.zip',
+#       exdir = 'data')
+
+ # try with substrate
+ substrate <- st_read(dsn = 'data/EUSM2019_Substrate/EUSM2019_substrate.gdb',
+                      layer = 'EUSM2019_Arctic_Atlantic_substrate')
+ st_crs(substrate)
+
+# subset data by North Sea:
+  # bounding box North Sea
+  # xmin, ymin, xmax, ymax
+  # -4.45, 51.00, 12.01, 61.02
+  NS <- st_polygon(list(rbind(c(-4.45,51.00),
+                                 c(12.01,51.00),
+                                 c(12.01,61.02),
+                                 c(-4.45,61.02),
+                                 c(-4.45,51.00))))
+  NS <- st_sfc(NS) %>% st_set_crs(NA) %>% st_set_crs(4326)
+  
+  # transform coordinates to match habitats CRS
+  NS <- NS %>% st_transform(3857)
+
+  # cut (intersect) substrate by North Sea bbox
+  NS_substrate <- st_intersection(substrate, NS)
+
+ # the Seabed substrate map originates from a very detailed vector layer
+# so convert polygons to raster on at aggregated resolution
+# raster template
+r_template <- raster(ncols = 791, nrows = 481, 
+                     crs = projection(NS_substrate), 
+                     ext = extent(NS_substrate),
+                     vals = NULL)
+
+# apparently not all polygon type (error with fasterize)
+NS_substrate <- st_cast(NS_substrate, "POLYGON")
+
+# Fasterize for amazingly fast sf to raster! see https://github.com/ecohealthalliance/fasterize
+r_NS_substrate_f <- fasterize(NS_substrate, r_template, field = "Substrate")
+
+# # convert to dataframe for ggplot
+r_NS_Substrate_spdf <- as(r_NS_substrate_f, 'SpatialPixelsDataFrame')
+r_NS_Substrate_df <- as.data.frame(r_NS_Substrate_spdf)
+colnames(r_NS_Substrate_df) <- c('Substrate', 'lon', 'lat')
+# 
+# plot(r_NS_Substrate, axes = TRUE)
+# 
+# # Plot data in ggplot
+ggplot() +
+  geom_tile(data=r_NS_Substrate_df, aes(x=lon, y=lat, fill=factor(Substrate))) +
+  scale_fill_viridis_d(breaks = as.character(1:length(levels(NS_substrate$Substrate))),
+                       labels = levels(NS_substrate$Substrate),
+                       name = 'Substrate')
+
+```
+
+Extract substrate data from rasters:
+
+```{r extractsubstrate, message=FALSE, warning=FALSE, error=FALSE, fig.align='center'}
+Dutch_shell_sf$substrate <- extract(r_NS_substrate_f , Dutch_shell_sf)
+
+# add levels to substrate:
+Dutch_shell_sf$substrate <- factor(Dutch_shell_sf$substrate,
+                                   levels = 1:length(levels(NS_substrate$Substrate)),
+                                   labels = levels(NS_substrate$Substrate))
+```
+
+#### Bio-Oracle layers
+
+We use other descriptors from the sdmpredictors package:
+
+<http://www.bio-oracle.org/>
+
+sdmpredictors contains several datasets, each containing several layers:
+```{r biooracle, message=FALSE, warning=FALSE, error=FALSE, fig.align='center'}
+library(sdmpredictors)
+# list datasets of sdmpredictors package
+datatable(list_datasets())
+
+# list layers of Bio-ORACLE dataset
+datatable(list_layers(datasets="Bio-ORACLE"))
+```
+
+load all interesting layers:
+
+```{r , message=FALSE, warning=FALSE, error=FALSE, fig.align='center'}
+# load some Bio-Oracle layers:
+bo_layers <- load_layers(layercodes = c("BO_phosphate",
+                           "BO_nitrate",
+                           "BO_salinity",
+                           "BO_sstmax",
+                           "BO_sstmean",
+                           "BO_dissox",
+                           "BO2_curvelmax_bdmax",  # Current velocity (maximum at max depth)
+                           "BO2_lightbotmax_bdmax"), # Light at bottom (maximum at max depth)
+                         rasterstack = TRUE )
+
+Dutch_shell_sf <- cbind(Dutch_shell_sf,
+                        extract(bo_layers, Dutch_shell_sf))
+
+```
+
+
+#### Distance to the coast
+
+Get coastline from rnaturalearth package:
+```{r rnaturalearth, message=FALSE, warning=FALSE, error=FALSE, fig.align='center'}
+library(rnaturalearth)
+BENLGER <- ne_countries(scale = 'large',
+                     country = c('Belgium', 'Netherlands', 'Germany'),
+                     type = 'countries')
+BENLGER <- st_as_sf(BENLGER) %>% st_combine()
+
+mapview(BENLGER)
+
+```
+Calculate distance to the coastline:
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, fig.align='center'}
+# Calculate distance to the coastline:
+coastdist <- st_distance(BENLGER, Dutch_shell_sf)
+
+# Combine to dataframe:
+Dutch_shell_sf$coastdist <- as.vector(coastdist)
+  
+```
+
+Check if it looks ok (for first 50 records):
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, fig.align='center'}
+mapview(Dutch_shell_sf[1:50,],
+        zcol = "coastdist")
+```
+
+
+
+Select only a selection of the parameters:
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, fig.align='center'}
+library(dplyr)
+
+Dutch_shell_sel <- Dutch_shell_sf %>%
+select(datecollected, decimallongitude, decimallatitude,
+       aphiaid, scientificnameaccepted,
+       kingdom, phylum, class,
+       order, family, genus,
+       subgenus, specificepithet, infraspecificepithet,
+       Bedabundance = BedAbund....m.2.,
+       BedWetWtBiom = BedWetWtBiom..g.m.2.,
+       fishing, bathy, substrate,
+       BO_phosphate, BO_nitrate, BO_salinity,
+       BO_sstmax, BO_sstmean,
+       BO_dissox, BO2_curvelmax_bdmax,
+       BO2_lightbotmax_bdmax, geometry, coastdist)
+write.csv(Dutch_shell_sel,
+          file = "data/Dutch_shell_variables.csv",
+          row.names = FALSE,
+          quote = grep('geometry', colnames(Dutch_shell_sel))
+)
+write.table(Dutch_shell_sel,
+          file = "data/Dutch_shell_variables_semicolon.csv",
+          row.names = FALSE,
+          sep = ";")
+
+```
+
+So in the end we have a dataset with following variables:
+
+* datecollected, decimallongitude, decimallatitude: *time + coordinates*
+* aphiaid, scientificnameaccepted, kingdom, phylum, class, order, family, genus, subgenus, specificepithet, infraspecificepithet: *taxonomic variables*
+* Bedabundance: *individuals per square meter (#/m²)*
+* BedWetWtBiom : *Wet weight biomass of biological entity (g/m²)*
+* Fishing: *fishing intensity* (average number of hours spent by Fishing ships in a square kilometre over a month)
+* Bathy: *bathymetry*
+* substrate: *seabed substreate*
+* BO_phosphate, BO_nitrate, BO_salinity: *environmental layers: phosphate, nitrate, salinity*
+* BO_sstmax, BO_sstmean: : *max and mean sea surface temperature*
+* BO_dissox: *dissolved oxygen*
+* BO2_curvelmax_bdmax: *Current velocity (maximum at max depth)*
+* BO2_lightbotmax_bdmax: *Light at bottom (maximum at max depth)*
+* Geometry: the geometry in well-known text (wkt)
+* Coastdist: *distance to the coast in meters*
+
+	
+
+***
+
