@@ -6,6 +6,8 @@ https://www.kaggle.com/mbkinaci/detailed-univariate-analysis-with-pandas
 
 ## Code snippets and runnable notebooks
 https://sebastianraschka.com/notebooks/ml-notebooks.html
+https://towardsdatascience.com/an-overview-of-different-unsupervised-learning-techniques-facb1e1f3a27
+https://towardsdatascience.com/feature-importance-with-neural-network-346eb6205743 (same author has a bunch of articles with code)
 
 ## Courses (hands-on)
 https://www.fast.ai/ (highly recommended)
